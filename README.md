@@ -174,57 +174,53 @@ React.js (PWA), Tailwind CSS, Node.js, Express, PostgreSQL, Python, scikit-learn
 
 ## Adversarial Defense & Anti-Spoofing Strategy
 
-> **Market Crash scenario:** A coordinated ring of 500 delivery partners with fake GPS simultaneously claims payouts during a real disruption event, draining the platform's liquidity pool before the system catches on.
+> **The scenario:** 500 delivery partners with fake GPS all claim payouts at the same time during a real disruption, trying to drain the system before anyone notices.
 
-This is the hardest fraud problem we have to solve — because during a genuine flood or Red Alert, there *are* hundreds of real workers who deserve to be paid. The fraud ring hides inside that legitimate crowd. Simple GPS verification alone doesn't work because a spoofed coordinate can look identical to a real one.
+The tricky part here is that during an actual flood or Red Alert, there genuinely are hundreds of workers who deserve to be paid. The fake ones are hiding inside that crowd. Just checking GPS coordinates isn't enough because a spoofed location looks the same as a real one on paper.
 
-Here's how we think about catching them.
-
----
-
-### What gives a fraud ring away that a genuine worker wouldn't trigger
-
-**1. Claim velocity spike**
-During a normal disruption event, claims come in gradually as workers check in and the system detects them one by one. A coordinated ring submits claims in a tight burst — hundreds of requests within the same 2-3 minute window. Genuine workers don't all check in at the exact same second. We flag any zone where claim submissions spike more than 4x the historical average rate within a 5-minute window and hold those for secondary validation.
-
-**2. GPS behaviour is static or teleporting**
-A real delivery worker sitting out a storm is still moving slightly — walking to shelter, shifting position, checking their phone. Their GPS pings show small natural drift within a few hundred metres. A spoofed coordinate is either perfectly static (same lat/lng for 45 minutes, which never happens with a real phone) or it jumps between locations impossibly fast — like moving 8km in 30 seconds. We log GPS pings every 10 minutes during a disruption window and flag anyone whose coordinates show zero drift or physically impossible movement.
-
-**3. Account clustering signals**
-A fraud ring doesn't operate in isolation. We look for:
-- Multiple accounts registered from the same device (same device fingerprint)
-- Multiple accounts with payouts routing to the same UPI ID or the same bank account
-- Accounts created in a batch — 50 new registrations in the same zone within the same week, all claiming in the same event
-Any cluster of 3+ accounts sharing device, UPI, or registration timing gets escalated immediately.
-
-**4. Platform activity contradiction**
-This is the cleanest signal. If a worker's delivery platform data shows they completed orders during the disruption window, they were physically working — not stranded. We cross-reference claim windows against platform activity. A real stranded worker has zero order completions. A fraudulent one might have forgotten to pause their platform availability, or the ring operator didn't account for this check.
-
-**5. Historical trust score**
-Workers who have been on the platform for more than 4 weeks, have consistent GPS patterns across previous shifts, and have never had a flagged claim get a higher trust score. New accounts with no history claiming a large-payout event in their first week get held for manual review — not rejected, just slowed down.
+So we had to think about what a fake worker does differently from a real one.
 
 ---
 
-### How we avoid punishing honest workers
+### How we catch the fakes
 
-The risk of an aggressive fraud system is that it blocks a genuinely stranded worker from getting paid. That's a worse outcome than a few fraudulent payouts getting through.
+**1. Too many claims at once**
+When a real disruption happens, workers check in and claims come in slowly over time — not all at once. If we suddenly see hundreds of claims from the same zone in a 5 minute window, that's not normal. Real workers don't all hit submit at the exact same moment. We hold that batch and check them before paying out.
 
-Our approach is **tiered response, not binary block:**
+**2. GPS that doesn't move or jumps around weirdly**
+A real worker stuck in rain is still moving a little — going to shelter, shifting around, checking their phone. Their GPS drifts naturally. A fake GPS location either stays completely still for 45 minutes straight (which no real phone does) or jumps across the city in 30 seconds. We check GPS pings every 10 minutes during a disruption and flag anything that looks physically impossible.
 
-| Risk Level | What triggers it | What happens |
-|---|---|---|
-| Low | Normal claim, trusted worker, GPS looks fine | Auto-approved, payout sent immediately |
-| Medium | New account, OR minor GPS anomaly, OR slightly elevated claim velocity | Payout held for 2 hours, secondary checks run, auto-released if checks pass |
-| High | Static GPS + new account + no platform history | Manual review queue, worker notified with reason, resolved within 24 hrs |
-| Fraud ring flag | Device/UPI clustering + velocity spike | All linked accounts frozen, investigation triggered, no payouts until resolved |
+**3. Multiple accounts linked to the same person**
+People running fake accounts usually reuse their phone or their UPI ID across accounts. We look for accounts sharing the same device, the same UPI, or accounts that were all created around the same time in the same zone. If 3 or more accounts are linked like this, we freeze all of them and look into it.
 
-We never silently reject. If a worker's payout is held, they get a notification explaining why and an estimated resolution time. A genuinely stranded worker who gets a 2-hour delay is frustrated but compensated. A fraudster who gets caught in the cluster detection doesn't get paid at all.
+**4. The worker was actually delivering during the "disruption"**
+This is the simplest check. If the platform data shows someone completed deliveries during the time they're claiming they couldn't work — that's a direct contradiction. A genuinely stranded worker has zero activity. We cross-check this for every claim.
+
+**5. New accounts get a slower payout**
+Workers with a few weeks of history, consistent check-ins, and no past issues get paid immediately. Brand new accounts claiming a big payout in their very first week get held for a quick review first — not rejected, just slowed down a bit until we can verify.
 
 ---
 
-### What we can't catch (and why we're honest about it)
+### Making sure we don't punish real workers
 
-A very sophisticated single actor who has a real account with genuine history, uses a real physical phone with natural GPS movement, but is simply not in the disrupted zone — we can't reliably catch that with our current architecture. Platform activity cross-referencing helps, but if that data isn't available in real time, we have a gap. We're flagging this as a known limitation and plan to address it in Phase 3 with a more robust behavioural baseline model.
+The whole point of GigShield is to help workers who are genuinely stuck. So we can't just block everything that looks slightly suspicious — that defeats the purpose.
+
+Our approach is to slow down suspicious claims, not automatically reject them:
+
+| Situation | What happens |
+|---|---|
+| Looks normal, trusted worker | Paid immediately |
+| New account or minor GPS issue | Held for 2 hours, auto-released if checks pass |
+| Static GPS + new account + no history | Goes to manual review, worker is notified, resolved within 24 hrs |
+| Multiple accounts sharing device or UPI | All linked accounts frozen until investigated |
+
+We never silently block anyone. If a payout is delayed, the worker gets a message explaining why and when it'll be resolved. A real worker who waits 2 hours is annoyed but still gets paid. A fake one gets caught in the account checks and doesn't.
+
+---
+
+### What we're honest about
+
+A single person with a real account, real history, and a real phone who just isn't in the disrupted zone — we probably can't catch that right now. The platform activity check helps, but it's not foolproof. We know this is a gap and we're planning to work on better behavioural checks in Phase 3.
 
 ---
 
