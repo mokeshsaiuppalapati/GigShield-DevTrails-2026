@@ -121,26 +121,21 @@ We'll train a simple ML model (decision tree or light gradient boosting using sc
 We'll use historical IMD weather data + OpenWeatherMap data to build and test this.
 
 **2. Fraud detection**
-The main fraud we're worried about: a worker claiming they were in a disrupted zone when they weren't.
+The main fraud we're worried about: a worker faking their location to claim a payout during a disruption they weren't actually affected by.
 
 We'll validate against:
-- The worker's last known GPS location (from shift check-in)
-- Whether platform delivery activity in that zone dropped during the disruption window
+- GPS location at shift check-in vs. the disrupted zone coordinates
+- Whether the delivery platform shows active order completions during the "disruption window" — if you completed 3 deliveries during the flood, you weren't stranded
+- GPS path behaviour — a real worker's location shows natural movement; a spoofed location tends to be suspiciously static or jumps impossibly between coordinates
 - Duplicate claim detection — same worker, same event, same day
 
-We'll implement this as a basic anomaly detection layer using Isolation Forest (scikit-learn). Not a production-grade fraud system, but enough to catch obvious patterns.
+We'll implement this using Isolation Forest (scikit-learn) for anomaly detection, plus a rule-based layer on top for the obvious patterns.
 
 ---
 
 ## Tech stack
 
-**Frontend:** React.js (PWA) + Tailwind CSS  
-**Backend:** Node.js + Express  
-**Database:** PostgreSQL  
-**ML/AI:** Python (scikit-learn, pandas) — served via a simple Flask API  
-**External APIs:** OpenWeatherMap (free tier), OpenAQ (free), IMD RSS feeds  
-**Payments:** Razorpay test mode for simulated UPI payouts  
-**Version control:** This GitHub repo
+React.js (PWA), Tailwind CSS, Node.js, Express, PostgreSQL, Python, scikit-learn, pandas, Flask, OpenWeatherMap API, OpenAQ API, IMD RSS feeds, Razorpay test mode
 
 ---
 
@@ -174,6 +169,62 @@ We'll implement this as a basic anomaly detection layer using Isolation Forest (
 - **Zero-touch claims.** The worker never initiates anything. Disruption happens → system detects → payout sent. The goal is that the worker finds out about the claim when they get the UPI credit notification.
 
 - **Focused scope.** Income loss only. No health, no vehicle, no accidents. Keeping it narrow makes it more trustworthy and easier to price correctly.
+
+---
+
+## Adversarial Defense & Anti-Spoofing Strategy
+
+> **Market Crash scenario:** A coordinated ring of 500 delivery partners with fake GPS simultaneously claims payouts during a real disruption event, draining the platform's liquidity pool before the system catches on.
+
+This is the hardest fraud problem we have to solve — because during a genuine flood or Red Alert, there *are* hundreds of real workers who deserve to be paid. The fraud ring hides inside that legitimate crowd. Simple GPS verification alone doesn't work because a spoofed coordinate can look identical to a real one.
+
+Here's how we think about catching them.
+
+---
+
+### What gives a fraud ring away that a genuine worker wouldn't trigger
+
+**1. Claim velocity spike**
+During a normal disruption event, claims come in gradually as workers check in and the system detects them one by one. A coordinated ring submits claims in a tight burst — hundreds of requests within the same 2-3 minute window. Genuine workers don't all check in at the exact same second. We flag any zone where claim submissions spike more than 4x the historical average rate within a 5-minute window and hold those for secondary validation.
+
+**2. GPS behaviour is static or teleporting**
+A real delivery worker sitting out a storm is still moving slightly — walking to shelter, shifting position, checking their phone. Their GPS pings show small natural drift within a few hundred metres. A spoofed coordinate is either perfectly static (same lat/lng for 45 minutes, which never happens with a real phone) or it jumps between locations impossibly fast — like moving 8km in 30 seconds. We log GPS pings every 10 minutes during a disruption window and flag anyone whose coordinates show zero drift or physically impossible movement.
+
+**3. Account clustering signals**
+A fraud ring doesn't operate in isolation. We look for:
+- Multiple accounts registered from the same device (same device fingerprint)
+- Multiple accounts with payouts routing to the same UPI ID or the same bank account
+- Accounts created in a batch — 50 new registrations in the same zone within the same week, all claiming in the same event
+Any cluster of 3+ accounts sharing device, UPI, or registration timing gets escalated immediately.
+
+**4. Platform activity contradiction**
+This is the cleanest signal. If a worker's delivery platform data shows they completed orders during the disruption window, they were physically working — not stranded. We cross-reference claim windows against platform activity. A real stranded worker has zero order completions. A fraudulent one might have forgotten to pause their platform availability, or the ring operator didn't account for this check.
+
+**5. Historical trust score**
+Workers who have been on the platform for more than 4 weeks, have consistent GPS patterns across previous shifts, and have never had a flagged claim get a higher trust score. New accounts with no history claiming a large-payout event in their first week get held for manual review — not rejected, just slowed down.
+
+---
+
+### How we avoid punishing honest workers
+
+The risk of an aggressive fraud system is that it blocks a genuinely stranded worker from getting paid. That's a worse outcome than a few fraudulent payouts getting through.
+
+Our approach is **tiered response, not binary block:**
+
+| Risk Level | What triggers it | What happens |
+|---|---|---|
+| Low | Normal claim, trusted worker, GPS looks fine | Auto-approved, payout sent immediately |
+| Medium | New account, OR minor GPS anomaly, OR slightly elevated claim velocity | Payout held for 2 hours, secondary checks run, auto-released if checks pass |
+| High | Static GPS + new account + no platform history | Manual review queue, worker notified with reason, resolved within 24 hrs |
+| Fraud ring flag | Device/UPI clustering + velocity spike | All linked accounts frozen, investigation triggered, no payouts until resolved |
+
+We never silently reject. If a worker's payout is held, they get a notification explaining why and an estimated resolution time. A genuinely stranded worker who gets a 2-hour delay is frustrated but compensated. A fraudster who gets caught in the cluster detection doesn't get paid at all.
+
+---
+
+### What we can't catch (and why we're honest about it)
+
+A very sophisticated single actor who has a real account with genuine history, uses a real physical phone with natural GPS movement, but is simply not in the disrupted zone — we can't reliably catch that with our current architecture. Platform activity cross-referencing helps, but if that data isn't available in real time, we have a gap. We're flagging this as a known limitation and plan to address it in Phase 3 with a more robust behavioural baseline model.
 
 ---
 
