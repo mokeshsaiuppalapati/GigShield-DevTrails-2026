@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>GigShield</title>
+
+<style>
+body{
+ margin:0;font-family:Segoe UI;
+ background:linear-gradient(135deg,#1e3c72,#2a5298);
+ display:flex;justify-content:center;align-items:center;height:100vh;
+}
+
+.phone{
+ width:360px;background:#f5f7fa;border-radius:25px;overflow:hidden;
+}
+
+.header{
+ background:#1e3c72;color:white;padding:15px;text-align:center;
+}
+
+.screen{display:none;}
+.screen.active{display:block;}
+
+.body{
+ padding:18px; /* FIXED spacing */
+}
+
+/* INPUT FIX */
+input,select{
+ width:100%;
+ padding:10px;
+ margin:10px 0; /* spacing */
+ border-radius:10px;
+ border:1px solid #ccc;
+ box-sizing:border-box;
+}
+
+button{
+ width:100%;padding:10px;border:none;border-radius:10px;
+ background:#2ecc71;color:white;margin-top:10px;
+}
+
+.plan{
+ padding:10px;border-radius:10px;margin:6px 0;
+ border:1px solid #ccc;cursor:pointer;
+ display:flex;justify-content:space-between;
+}
+
+.plan.selected{
+ border:2px solid #2ecc71;background:#eafaf1;
+}
+
+.status-box{
+ font-size:12px;
+}
+
+.active{color:green;font-weight:bold;}
+.expired{color:red;font-weight:bold;}
+
+.card{
+ background:white;padding:10px;border-radius:10px;margin-top:10px;
+}
+
+.small{font-size:12px;color:#555;}
+</style>
+</head>
+
+<body>
+
+<div class="phone">
+
+<!-- L1 -->
+<div class="screen active" id="s0">
+<div class="header">GigShield</div>
+<div class="body">
+<button onclick="go(1)">Start</button>
+</div>
+</div>
+
+<!-- L2 -->
+<div class="screen" id="s1">
+<div class="header">Login / Register</div>
+<div class="body">
+
+<input id="userName" placeholder="Name">
+<input id="phone" placeholder="Phone">
+<input id="zone" placeholder="Zone">
+<input id="upi" placeholder="UPI">
+<input id="income" placeholder="Income">
+
+<button onclick="register()">Register</button>
+
+<hr>
+
+<input id="loginName" placeholder="Login Name">
+<button onclick="login()">Login</button>
+
+</div>
+</div>
+
+<!-- RULES -->
+<div class="screen" id="s2">
+<div class="header">Policy Rules</div>
+<div class="body">
+<div class="card">
+• Weekly (7 days)<br>
+• Auto payout<br>
+• No plan change until expiry<br>
+• Zone must match<br>
+</div>
+<button onclick="go(3)">Continue</button>
+</div>
+</div>
+
+<!-- USER -->
+<div class="screen" id="s3">
+<div class="header" id="userTitle"></div>
+<div class="body">
+
+<div id="policyInfo"></div>
+
+<!-- PLANS -->
+<div class="plan" onclick="selectPlan('basic')">
+  Basic - ₹35/week
+</div>
+
+<div class="plan" onclick="selectPlan('standard')">
+  Standard - ₹50/week
+</div>
+
+<div class="plan" onclick="selectPlan('premium')">
+  Premium - ₹80/week
+</div>
+
+<!-- 🔥 GLOBAL STATUS (what you wanted) -->
+<div style="display:flex; gap:20px; align-items:center; margin-top:10px;">
+  <label style="display:flex; align-items:center; gap:6px;">
+    <input type="checkbox" id="activeBox" disabled> Active
+  </label>
+
+  <label style="display:flex; align-items:center; gap:6px;">
+    <input type="checkbox" id="expiredBox" disabled> Expired
+  </label>
+</div>
+
+<div id="msg"></div>
+<button onclick="createPolicy()">Activate</button>
+
+<div class="card">
+Plan: <b id="premium"></b><br>
+Cap: <b id="cap"></b><br>
+Hours: <b id="hoursVal"></b><br>
+Payout: <b id="payout"></b>
+</div>
+
+<!-- TOTAL PAYOUT -->
+<div class="card">
+Total payout (7 days): <b id="totalPayout">₹0</b>
+</div>
+
+<div class="card">
+<h4>History</h4>
+<div id="history"></div>
+</div>
+
+<button onclick="go(4)">Simulation</button>
+<button onclick="logout()">Logout</button>
+
+</div>
+</div>
+
+<!-- SIMULATION -->
+<div class="screen" id="s4">
+<div class="header">Simulation</div>
+<div class="body">
+
+<select id="type">
+<option value="rain">Rain</option>
+<option value="aqi">AQI</option>
+<option value="heat">Heat</option>
+<option value="bandh">Bandh</option>
+</select>
+
+<input id="simZone" placeholder="Zone">
+<input id="hours" placeholder="Hours">
+
+<button onclick="simulate()">Trigger</button>
+<button onclick="go(3)">Back</button>
+
+</div>
+</div>
+
+</div>
+
+<script>
+const base="http://localhost:3000";
+
+let user=null;
+let plan=null;
+let policyData=null;
+
+// NAV
+function go(n){
+ document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+ document.getElementById("s"+n).classList.add("active");
+}
+
+// REGISTER
+async function register(){
+ let nameVal=document.getElementById("userName").value;
+
+ await fetch(base+"/register",{method:"POST",
+ headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({
+  name:nameVal,
+  phone:phone.value,
+  zone:zone.value,
+  upi:upi.value,
+  income:Number(income.value)
+ })});
+
+ alert("Registered");
+}
+
+// LOGIN
+async function login(){
+
+ let inputName = document.getElementById("loginName").value.trim();
+
+ if(!inputName){
+  alert("Enter name");
+  return;
+ }
+
+ let r = await fetch(base+"/workers");
+ let d = await r.json();
+
+ user = d.find(x => 
+   x.name && x.name.toLowerCase() === inputName.toLowerCase()
+ );
+
+ if(!user){
+  alert("User not found");
+  return;
+ }
+
+ userTitle.innerText = "Hey " + user.name;
+
+ // set simulation zone
+ document.getElementById("simZone").value = user.zone;
+
+ // 🔥 reset session-specific values ONLY
+ document.getElementById("payout").innerText = "₹0";
+ document.getElementById("hoursVal").innerText = "0";
+
+ // 🔥 DO NOT reset premium/cap here (handled in loadPolicy)
+
+ await loadPolicy();
+ await loadHistory();
+
+ go(2);
+}
+
+// PLAN SELECT (LOCK FIX)
+function selectPlan(p){
+
+ if(policyData && new Date(policyData.end_date) > new Date()){
+  document.getElementById("msg").innerText = "Plan already active. Cannot change.";
+  return;
+ }
+
+ plan = p;
+
+ document.querySelectorAll(".plan").forEach(x=>x.classList.remove("selected"));
+ event.target.classList.add("selected");
+
+ document.getElementById("msg").innerText = "Selected: "+p;
+}
+
+// CREATE POLICY
+async function createPolicy(){
+
+ if(policyData && new Date(policyData.end_date) > new Date()){
+  document.getElementById("msg").innerText = "Plan already active";
+  return;
+ }
+
+ let r = await fetch(base+"/create-policy",{
+  method:"POST",
+  headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({worker_id:user.id,plan})
+ });
+
+ let d = await r.json();
+
+ if(d.error){
+  document.getElementById("msg").innerText = d.error;
+  return;
+ }
+
+ premium.innerText =
+ `${plan.charAt(0).toUpperCase() + plan.slice(1)} - ₹${d.premium}/week`;
+ cap.innerText = d.max_cap;
+
+ document.getElementById("msg").innerText = "Activated";
+
+ await loadPolicy();
+}
+// POLICY LOAD
+async function loadPolicy(){
+
+ let res = await fetch(base+"/policy/"+user.id);
+
+ // 🔥 safe parsing
+ let text = await res.text();
+ let p = text ? JSON.parse(text) : null;
+
+ policyData = p;
+
+ let activeBox = document.getElementById("activeBox");
+ let expiredBox = document.getElementById("expiredBox");
+
+ // reset checkboxes
+ activeBox.checked = false;
+ expiredBox.checked = false;
+
+ if(!p){
+  document.getElementById("policyInfo").innerText = "No plan";
+
+  // 🔥 reset premium & cap
+  document.getElementById("premium").innerText = "-";
+  document.getElementById("cap").innerText = "0";
+
+  return;
+ }
+
+ let now = new Date();
+ let end = new Date(p.end_date);
+
+ let active = end > now;
+
+ if(active){
+  activeBox.checked = true;
+ }else{
+  expiredBox.checked = true;
+ }
+
+ let days = Math.ceil((end - now)/(1000*60*60*24));
+
+ document.getElementById("policyInfo").innerText =
+  active ? `Active (${days} days left)` : "Expired";
+
+ // 🔥 KEY FIX: persist premium & cap
+ if(active){
+  document.getElementById("premium").innerText =  `${p.plan.charAt(0).toUpperCase() + p.plan.slice(1)} - ₹${p.premium}/week`;
+  document.getElementById("cap").innerText = `₹${p.max_cap}`;
+ }else{
+  document.getElementById("premium").innerText = "-";
+  document.getElementById("cap").innerText = "0";
+ }
+}
+
+// SIMULATE
+async function simulate(){
+ let r=await fetch(base+"/trigger",{
+  method:"POST",
+  headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({
+   type:type.value,
+   zone:simZone.value,
+   hours:Number(hours.value),
+   worker_id:user.id
+  })
+ });
+
+ let d=await r.json();
+
+ let val=(d.claims && d.claims.length)?d.claims[0].payout:0;
+
+ payout.innerText="₹"+val;
+ hoursVal.innerText=hours.value;
+
+ await loadHistory();
+
+ go(3);
+}
+
+// HISTORY FIXED
+async function loadHistory(){
+
+ let r = await fetch(base+"/claims");
+ let data = await r.json();
+
+ let my = data.filter(x => Number(x.worker_id) === Number(user.id));
+
+ const historyDiv = document.getElementById("history");
+ const totalDiv = document.getElementById("totalPayout");
+
+ if(my.length === 0){
+  historyDiv.innerHTML = "No claims yet";
+  totalDiv.innerText = "₹0";
+  return;
+ }
+
+ let total = 0;
+
+ historyDiv.innerHTML = my.map(c=>{
+  total += Number(c.amount)||0;
+
+  return `<div class="small">
+    ${c.type} → ₹${c.amount} (${c.status})
+  </div>`;
+ }).join("");
+
+ totalDiv.innerText = "₹"+total;
+}
+
+// LOGOUT
+function logout(){
+ user=null;
+
+ document.getElementById("payout").innerText="₹0";
+ document.getElementById("hoursVal").innerText="0";
+ document.getElementById("history").innerHTML="";
+ document.getElementById("totalPayout").innerText="₹0";
+
+ go(0);
+}
+</script>
+
+</body>
+</html>
